@@ -1,0 +1,32 @@
+# Local services for Toolshed. Start them with: docker compose up -d
+name: njfs
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: njfs-postgres
+    environment:
+      POSTGRES_USER: toolshed
+      POSTGRES_PASSWORD: toolshed
+      POSTGRES_DB: toolshed
+    ports:
+      - "18842:5432"
+    volumes:
+      - njfs-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U toolshed -d toolshed"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # A pretend mail server: it accepts every email and shows it in a web page
+  # (http://localhost:18843) instead of delivering it to anyone.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: njfs-mailpit
+    ports:
+      - "18843:8025" # web page
+      - "18844:1025" # SMTP, where the app sends mail
+
+volumes:
+  njfs-pgdata:

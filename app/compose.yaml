@@ -1,0 +1,99 @@
+# Toolshed's services.
+#   docker compose up -d                           PostgreSQL and Mailpit, for `npm run dev`
+#   docker compose --profile app up -d --build     the whole app, as it would run on a server
+name: njfs
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: njfs-postgres
+    environment:
+      POSTGRES_USER: toolshed
+      POSTGRES_PASSWORD: toolshed
+      POSTGRES_DB: toolshed
+    ports:
+      - "18842:5432"
+    volumes:
+      - njfs-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U toolshed -d toolshed"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # A pretend mail server: it accepts every email and shows it in a web page
+  # (http://localhost:18843) instead of delivering it to anyone.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: njfs-mailpit
+    ports:
+      - "18843:8025" # web page
+      - "18844:1025" # SMTP, where the app sends mail
+
+  # Runs the database migrations once, then stops. The app waits for it to finish.
+  migrate:
+    profiles: ["app"]
+    build:
+      context: .
+      target: builder
+    image: njfs-toolshed-builder
+    container_name: njfs-migrate
+    environment:
+      DATABASE_URL: postgres://toolshed:toolshed@postgres:5432/toolshed
+    command: ["npm", "run", "db:migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    profiles: ["app"]
+    build:
+      context: .
+      target: runner
+    image: njfs-toolshed
+    container_name: njfs-app
+    # The secrets (BETTER_AUTH_SECRET, CRON_SECRET) come from your .env file.
+    env_file:
+      - path: .env
+        required: false
+    # These replace the .env values that only make sense outside Docker.
+    environment:
+      DATABASE_URL: postgres://toolshed:toolshed@postgres:5432/toolshed
+      BETTER_AUTH_URL: http://localhost:18845
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      MAIL_FROM: Toolshed <reminders@toolshed.test>
+    ports:
+      - "18845:3000"
+    volumes:
+      - njfs-uploads:/app/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    restart: unless-stopped
+
+  # The schedule for overdue reminders: call the reminder job, wait an hour, repeat.
+  scheduler:
+    profiles: ["app"]
+    image: curlimages/curl:latest
+    container_name: njfs-scheduler
+    env_file: # for CRON_SECRET
+      - path: .env
+        required: false
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          curl -sS -X POST -H "Authorization: Bearer $$CRON_SECRET" http://app:3000/api/cron/overdue-reminders
+          echo
+          sleep 3600
+        done
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  njfs-pgdata:
+  njfs-uploads:

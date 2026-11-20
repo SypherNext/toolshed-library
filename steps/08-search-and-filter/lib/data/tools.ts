@@ -1,0 +1,52 @@
+// Every database read about tools goes through this file, so pages never write SQL themselves.
+import "server-only";
+import { and, asc, desc, eq, ilike, type SQL } from "drizzle-orm";
+import type { CatalogFilters } from "@/lib/catalog-filters";
+import { db } from "@/lib/db";
+import { members, tools } from "@/lib/db/schema";
+
+const toolColumns = {
+  id: tools.id,
+  name: tools.name,
+  category: tools.category,
+  description: tools.description,
+  photoUrl: tools.photoUrl,
+  available: tools.available,
+  ownerId: tools.ownerId,
+  ownerName: members.name,
+};
+
+function selectTools() {
+  return db
+    .select(toolColumns)
+    .from(tools)
+    .innerJoin(members, eq(tools.ownerId, members.id));
+}
+
+// % and _ are wildcards in LIKE patterns, so a search for "50%" must escape them.
+function containsPattern(text: string): string {
+  const escaped = text.replace(/[\\%_]/g, (character) => `\\${character}`);
+  return `%${escaped}%`;
+}
+
+export async function searchTools(filters: CatalogFilters) {
+  const conditions: SQL[] = [];
+  if (filters.query) conditions.push(ilike(tools.name, containsPattern(filters.query)));
+  if (filters.category) conditions.push(eq(tools.category, filters.category));
+  if (filters.availableOnly) conditions.push(eq(tools.available, true));
+
+  return selectTools()
+    .where(and(...conditions))
+    .orderBy(asc(tools.name));
+}
+
+export type Tool = Awaited<ReturnType<typeof searchTools>>[number];
+
+export async function latestTools(count: number): Promise<Tool[]> {
+  return selectTools().orderBy(desc(tools.createdAt), desc(tools.id)).limit(count);
+}
+
+export async function findTool(id: number): Promise<Tool | undefined> {
+  const [tool] = await selectTools().where(eq(tools.id, id));
+  return tool;
+}

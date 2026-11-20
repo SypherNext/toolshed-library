@@ -1,0 +1,7 @@
+# Never copy these into an image: they are rebuilt inside it, or they hold secrets.
+node_modules
+.next
+.env
+uploads
+test-results
+playwright-report

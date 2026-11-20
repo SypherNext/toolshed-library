@@ -1,0 +1,23 @@
+# Local services for Toolshed. Start them with: docker compose up -d
+name: njfs
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: njfs-postgres
+    environment:
+      POSTGRES_USER: toolshed
+      POSTGRES_PASSWORD: toolshed
+      POSTGRES_DB: toolshed
+    ports:
+      - "18842:5432"
+    volumes:
+      - njfs-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U toolshed -d toolshed"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  njfs-pgdata:
